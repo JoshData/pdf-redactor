@@ -1,0 +1,3 @@
+git+https://github.com/pmaupin/pdfrw
+defusedxml
+pdfminer3k # use pdfminer in Python 2
