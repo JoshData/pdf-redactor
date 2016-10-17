@@ -506,6 +506,8 @@ def update_text_layer(options, text_content, text_map, page_tokens):
 		# Finding all matches...
 		text_map_index = 0
 		text_map_charpos = 0
+		text_map_token_xdiff = 0
+		text_content_xdiff = 0
 		for m in pattern.finditer(text_content):
 			# We got a match at text_content[i1:i2].
 			i1 = m.start()
@@ -523,18 +525,20 @@ def update_text_layer(options, text_content, text_map, page_tokens):
 				while text_map_charpos + text_map[text_map_index][0] <= i1:
 					text_map_charpos += text_map[text_map_index][0]
 					text_map_index += 1
+					text_map_token_xdiff = 0
 				assert(text_map_charpos <= i1)
 
 				# The token at text_map_index, and possibly subsequent ones,
 				# are responsible for this text. Replace the matched content
 				# here with replacement content.
+				tok = text_map[text_map_index][1]
 
 				# Where does this match begin within the token's text content?
-				mpos = i1 - text_map_charpos
+				mpos = i1 - text_map_charpos - text_map_token_xdiff
 				assert mpos >= 0
 
 				# How long is the match within this token?
-				mlen = min(i2-i1, text_map[text_map_index][0]-mpos)
+				mlen = min(i2-i1, len(tok.value)-mpos)
 				assert mlen >= 0
 
 				# How much should we replace here?
@@ -550,8 +554,13 @@ def update_text_layer(options, text_content, text_map, page_tokens):
 					replacement = None # sanity
 
 				# Do the replacement.
-				tok = text_map[text_map_index][1]
 				tok.value = tok.value[:mpos] + r + tok.value[mpos+mlen:]
+				text_map_token_xdiff += len(r) - mlen
+
+				# Also replace the text_content so that if we have multiple regexes
+				# the later regexes see content that matches the tokens.
+				text_content = text_content[0:i1+text_content_xdiff] + r + text_content[i2+text_content_xdiff:]
+				text_content_xdiff += len(r) - mlen
 
 				# Avance for next iteration.
 				i1 += mlen
