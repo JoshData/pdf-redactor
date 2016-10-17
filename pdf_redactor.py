@@ -120,7 +120,7 @@ def update_metadata(trailer, options):
 	# Get a list of all metadata fields that exist in the PDF plus any fields
 	# that there are metadata filters for (since they may insert field values).
 	keys = set(str(k)[1:] for k in trailer.Info.keys()) \
-	     | set(k for k in options.metadata_filters.keys() if k not in ("DEFAULT", "ALL"))
+		 | set(k for k in options.metadata_filters.keys() if k not in ("DEFAULT", "ALL"))
 
 	# Update each metadata field.
 	for key in keys:
@@ -233,7 +233,7 @@ def update_xmp_metadata(trailer, options):
 					xml.etree.ElementTree.register_namespace("xap", "http://ns.adobe.com/xap/1.0/")
 					xml.etree.ElementTree.register_namespace("dc", "http://purl.org/dc/elements/1.1/")
 					xml.etree.ElementTree.register_namespace("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-				return xml.etree.ElementTree.tostring(xml_root, encoding='unicode')
+				return xml.etree.ElementTree.tostring(xml_root, encoding='unicode' if sys.version_info>=(3,0) else None)
 		
 		# Create a fresh Metadata dictionary and serialize the XML into it.
 		from pdfrw.objects import PdfDict
