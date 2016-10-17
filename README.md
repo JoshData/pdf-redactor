@@ -27,42 +27,13 @@ Get this module and then install its dependencies with:
 
 	pip3 install -r requirements.txt
 
-`pdf_redactor.py` processes a PDF given on standard input and writes a new, redacted PDF to standard output.
+`pdf_redactor.py` processes a PDF given on standard input and writes a new, redacted PDF to standard output:
 
-However, you should use the `pdf_redactor` module as a library and pass in text filtering functions written in Python, since the command-line version of the tool does not yet actually do anything to the PDF. That means you should make your own main module like this:
+	python3 pdf_redactor.py < document.pdf > document-redacted.pdf
 
-	import re
-	from datetime import datetime
+However, you should use the `pdf_redactor` module as a library and pass in text filtering functions written in Python, since the command-line version of the tool does not yet actually do anything to the PDF. The [example.py](example.py) script shows how to redact Social Security Numbers:
 
-	from pdf_redactor import *
-
-	options = RedactorOptions()
-
-	options.metadata_filters = {
-		# Perform some field filtering --- turn the Title into uppercase.
-		"Title": [lambda value : value.upper()],
-
-		# Set some values, overriding any value present in the PDF.
-		"Producer": [lambda value : "My Name"],
-		"CreationDate": [lambda value : datetime.utcnow()],
-
-		# Clear all other fields.
-		"DEFAULT": [lambda value : None],
-	}
-
-	# Clear any XMP metadata, if present.
-	options.xmp_filters = [lambda xml : None]
-
-	# Redact things that look like social security numbers, replacing the
-	# text with X's.
-	options.content_filters = [
-		(re.compile("111-22-3333"), lambda m : "XXX-XX-XXXX"),
-	]
-
-	# Perform the redaction using PDF on standard input and writing to standard output.
-	redactor(options)
-
-and then run `python3 your_module.py` instead of executing `pdf_redactor.py` directly.
+	python3 example.py < tests/test-ssns.pdf > document-redacted.pdf
 
 ## Limitations
 
