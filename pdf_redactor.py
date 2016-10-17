@@ -241,7 +241,40 @@ def update_xmp_metadata(trailer, options):
 		trailer.Root.Metadata.Type = "Metadata"
 		trailer.Root.Metadata.Subtype = "XML"
 		trailer.Root.Metadata.stream = serializer(value)
-	
+
+
+def tokenize_stream(stream):
+	# pdfrw's tokenizer PdfTokens does lexical analysis only. But we need
+	# to collapse arrays ([ .. ]) and dictionaries (<< ... >>) into single
+	# token entries.
+	from pdfrw import PdfTokens, PdfDict, PdfArray
+	stack = []
+	for token in iter(PdfTokens(stream)):
+		# Is this a control token?
+		if token == "<<":
+			# begins a dictionary
+			stack.append((PdfDict, []))
+			continue
+		elif token == "[":
+			# begins an array
+			stack.append((PdfArray, []))
+			continue
+		elif token in (">>", "]"):
+			# ends a dictionary or array
+			constructor, content = stack.pop(-1)
+			if constructor == PdfDict:
+				# Turn flat list into key/value pairs.
+				content = chunk_pairs(content)
+			token = constructor(content)
+
+		# If we're inside something, add this token to that thing.
+		if len(stack) > 0:
+			stack[-1][1].append(token)
+			continue
+
+		# Yield it.
+		yield token
+
 
 def build_text_layer(document, options):
 	# Within each page's content stream, look for text-showing operators to
@@ -280,7 +313,8 @@ def build_text_layer(document, options):
 	#
 	# To know the active font, we look for the "<font> <size> Tf" operator.
 
-	from pdfrw import PdfTokens, PdfObject, PdfString, PdfArray
+	from pdfrw import PdfObject, PdfString, PdfArray
+	from pdfrw.uncompress import uncompress as uncompress_streams
 	from pdfrw.objects.pdfname import BasePdfName
 
 	text_content = []
@@ -327,45 +361,59 @@ def build_text_layer(document, options):
 
 		prev_token = None
 		prev_prev_token = None
-		array_stack = []
 		current_font = None
 
+		# The page may have one content stream or an array of content streams.
+		# If an array, they are treated as if they are concatenated into a single
+		# stream (per the spec).
 		if isinstance(page.Contents, PdfArray):
 			contents = list(page.Contents)
 		else:
 			contents = [page.Contents]
 
+		# If a compression Filter is applied, attempt to un-apply it. If an unrecognized
+		# filter is present, an error is raised. uncompress_streams expects an array of
+		# streams.
+		uncompress_streams(contents)
+
+		def make_mutable_string_token(token):
+			if isinstance(token, PdfString):
+				token = TextToken(token.decode(), current_font)
+
+				# Remember all unicode characters seen in this font so we can
+				# avoid inserting characters that the PDF isn't likely to have
+				# a glyph for.
+				if current_font and current_font.BaseFont:
+					fontcache.setdefault(current_font.BaseFont, set()).update(token.value)
+			return token
+
+		# Iterate through the page's content streams.
 		for content in contents:
 			# Iterate through the tokens.
-			for token in iter(PdfTokens(content.stream)):
+			for token in tokenize_stream(content.stream):
 				# Replace any string token with our own class that hold a mutable
 				# value, which is how we'll rewrite content.
-				if isinstance(token, PdfString):
-					token = TextToken(token.decode(), current_font)
-
-					# Remember all unicode characters seen in this font so we can
-					# avoid inserting characters that the PDF isn't likely to have
-					# a glyph for.
-					if current_font and current_font.BaseFont:
-						fontcache.setdefault(current_font.BaseFont, set()).update(token.value)
-
+				token = make_mutable_string_token(token)
 
 				# Append the token into a new list that holds all tokens.
 				token_list.append(token)
 
 				# If the token is an operator and we're not inside an array...
-				if isinstance(token, PdfObject) and len(array_stack) == 0:
+				if isinstance(token, PdfObject):
 					# And it's one that we recognize, process it.
 					if token in ("Tj", "'", '"') and isinstance(prev_token, TextToken):
 						# Simple text operators.
 						process_text(prev_token)
-					elif token == "TJ" and isinstance(prev_token, list):
+					elif token == "TJ" and isinstance(prev_token, PdfArray):
 						# The text array operator.
-						for item in prev_token:
+						for i in range(len(prev_token)):
 							# (item may not be a string! only the strings are text.)
-							if isinstance(item, TextToken):
-								process_text(item)
+							prev_token[i] = make_mutable_string_token(prev_token[i])
+							if isinstance(prev_token[i], TextToken):
+								process_text(prev_token[i])
+
 					elif token == "Tf" and isinstance(prev_prev_token, BasePdfName):
+						# Update the current font.
 						# prev_prev_token holds the font 'name'. The name must be looked up
 						# in the content stream's resource dictionary, which is page.Resources,
 						# plus any resource dictionaries above it in the document hierarchy.
@@ -374,22 +422,6 @@ def build_text_layer(document, options):
 						while resources and not current_font:
 							current_font = resources.Font[prev_prev_token]
 							resources = resources.Parent
-
-				# Or something to do with arrays.
-				elif token == '[':
-					# Beginning of an array.
-					array_stack.append([])
-				elif token == ']':
-					# End of an array.
-					x = array_stack.pop(-1)
-					if len(array_stack) > 0:
-						# We were nested. Add this array into the outer array.
-						array_stack[-1].append(x)
-					else:
-						# This is the top level. Remember it as the last token.
-						token = x
-				elif len(array_stack) > 0:
-					array_stack[-1].append(token)
 
 				# Remember the previously seen token in case the next operator is a text-showing
 				# operator -- in which case this was the operand. Remember the token befor that
@@ -401,6 +433,169 @@ def build_text_layer(document, options):
 	text_content = "".join(text_content)
 
 	return (text_content, text_map, page_tokens)
+
+
+def chunk_pairs(s):
+	while len(s) >= 2:
+		yield (s.pop(0), s.pop(0))
+
+
+def chunk_triples(s):
+	while len(s) >= 3:
+		yield (s.pop(0), s.pop(0), s.pop(0))
+
+
+class CMap(object):
+	def __init__(self, cmap):
+		self.bytes_to_unicode = { }
+		self.unicode_to_bytes = { }
+		self.defns = { }
+		self.usecmap = None
+
+		# Decompress the CMap stream & check that it's not compressed in a way
+		# we can't understand.
+		from pdfrw.uncompress import uncompress as uncompress_streams
+		uncompress_streams([cmap])
+
+		#print(cmap.stream, file=sys.stderr)
+
+		# This is based on https://github.com/euske/pdfminer/blob/master/pdfminer/cmapdb.py.
+		from pdfrw import PdfString, PdfArray
+		in_cmap = False
+		operand_stack = []
+		codespacerange = []
+
+		def code_to_int(code):
+			# decode hex encoding
+			code = code.decode()
+			code = (ord(c) for c in code)
+			from functools import reduce
+			return reduce(lambda x0, x : x0*256 + x, (b for b in code))
+
+		def add_mapping(code, char, offset=0):
+			# Is this a mapping for a one-byte or two-byte character code?
+			width = len(codespacerange[0].decode())
+			assert len(codespacerange[1].decode()) == width
+			if width == 1:
+				# one-byte entry
+				if sys.version_info < (3,):
+					code = chr(code)
+				else:
+					code = bytes([code])
+			elif width == 2:
+				if sys.version_info < (3,):
+					code = chr(code//256) + chr(code & 255)
+				else:
+					code = bytes([code//256, code & 255])
+			else:
+				raise ValueError("Invalid code space range %s?" % repr(codespacerange))
+
+			# Some range operands take an array.
+			if isinstance(char, PdfArray):
+				char = char[offset]
+
+			# The Unicode character is given usually as a hex string of one or more
+			# two-byte Unicode code points.
+			if isinstance(char, PdfString):
+				char = char.decode()
+
+				# char now holds a str whose characters are actually bytes. We need
+				# to re-code the two-byte sequences as Unicode characters.
+				if sys.version_info < (3,):
+					char = (ord(c) for c in char)
+				else:
+					char = char.encode("latin-1") # pdfrw encodes everything
+
+				c = ""
+				for xh, xl in chunk_pairs(list(char)):
+					c += (chr if sys.version_info >= (3,) else unichr)(xh*256 + xl)
+				char = c
+
+				if offset > 0:
+					char = char[0:-1] + (chr if sys.version_info >= (3,) else unichr)(ord(char[-1]) + offset)
+			else:
+				assert offset == 0
+
+			self.bytes_to_unicode[code] = char
+			self.unicode_to_bytes[char] = code
+
+		for token in tokenize_stream(cmap.stream):
+			if token == "begincmap":
+				in_cmap = True
+				operand_stack[:] = []
+				continue
+			elif token == "endcmap":
+				in_cmap = False
+				continue
+			if not in_cmap:
+				continue
+			
+			if token == "def":
+				name = operand_stack.pop(0)
+				value = operand_stack.pop(0)
+				self.defns[name] = value
+
+			elif token == "usecmap":
+				self.usecmap = self.pop(0)
+
+			elif token == "begincodespacerange":
+				operand_stack[:] = []
+			elif token == "endcodespacerange":
+				codespacerange = [operand_stack.pop(0), operand_stack.pop(0)]
+
+			elif token in ("begincidrange", "beginbfrange"):
+				operand_stack[:] = []
+			elif token in ("endcidrange", "endbfrange"):
+				for (code1, code2, cid_or_name1) in chunk_triples(operand_stack):
+					if not isinstance(code1, PdfString) or not isinstance(code2, PdfString): continue
+					code1 = code_to_int(code1)
+					code2 = code_to_int(code2)
+					for code in range(code1, code2+1):
+						add_mapping(code, cid_or_name1, code-code1)
+				operand_stack[:] = []
+
+			elif token in ("begincidchar", "beginbfchar"):
+				operand_stack[:] = []
+			elif token in ("endcidchar", "endbfchar"):
+				for (code, char) in chunk_pairs(operand_stack):
+					if not isinstance(code, PdfString): continue
+					add_mapping(code_to_int(code), char)
+				operand_stack[:] = []
+
+			elif token == "beginnotdefrange":
+				operand_stack[:] = []
+			elif token == "endnotdefrange":
+				operand_stack[:] = []
+
+			else:
+				operand_stack.append(token)
+
+	def dump(self):
+		for code, char in self.bytes_to_unicode.items():
+			print(repr(code), char)
+
+	def decode(self, string):
+		ret = []
+		i = 0;
+		while i < len(string):
+			if string[i:i+1] in self.bytes_to_unicode:
+				# byte matches a single-byte entry
+				ret.append( self.bytes_to_unicode[string[i:i+1]] )
+				i += 1
+			elif string[i:i+2] in self.bytes_to_unicode:
+				# next two bytes matches a multi-byte entry
+				ret.append( self.bytes_to_unicode[string[i:i+2]] )
+				i += 2
+			else:
+				ret.append("?")
+				i += 1
+		return "".join(ret)
+
+	def encode(self, string):
+		ret = []
+		for c in string:
+			ret.append(self.unicode_to_bytes.get(c, b""))
+		return b"".join(ret)
 
 
 def toUnicode(string, font, fontcache):
@@ -415,24 +610,18 @@ def toUnicode(string, font, fontcache):
 		# There is no font for this text. Assume Latin-1.
 		return string.decode("Latin-1")
 	elif font.ToUnicode:
+		# Decompress the CMap stream & check that it's not compressed in a way
+		# we can't understand.
+		from pdfrw.uncompress import uncompress as uncompress_streams
+		uncompress_streams([font.ToUnicode])
+
 		# Use the CMap, which maps character codes to Unicode code points.
-		# We'll use pdfminer's CMap parser and we'll cache the parsed CMap.
-		# This seems to only work for two-byte CIDs -- is that normal?
 		if font.ToUnicode.stream not in fontcache:
-			from pdfminer.cmapdb import FileUnicodeMap, CMapParser
-			import io
-			cmap = FileUnicodeMap()
-			CMapParser(cmap, (io.StringIO if sys.version_info>=(3,) else io.BytesIO)(font.ToUnicode.stream)).run()
 			#print(font.ToUnicode.stream, file=sys.stderr)
 			#cmap.dump(sys.stderr)
-			fontcache[font.ToUnicode.stream] = cmap
+			fontcache[font.ToUnicode.stream] = CMap(font.ToUnicode)
 		cmap = fontcache[font.ToUnicode.stream]
-		def twobytechars(s):
-			if sys.version_info < (3,): s = [ord(c) for c in s]
-			for i in range(0, len(s), 2):
-				if i == len(s)-1: break # odd number of bytes
-				yield s[i+0]*256 + s[i+1]
-		string = "".join(cmap.cid2unichr.get(c, '?') for c in twobytechars(string))
+		string = cmap.decode(string)
 		#print(string, end='', file=sys.stderr)
 		#sys.stderr.write(string)
 		return string
@@ -467,17 +656,9 @@ def fromUnicode(string, font, fontcache, options):
 		string = string.encode("Latin-1")
 
 	elif font.ToUnicode and font.ToUnicode.stream in fontcache:
-		# Convert the Unicode code points back to two-byte CIDs.
+		# Convert the Unicode code points back to one/two-byte CIDs.
 		cmap = fontcache[font.ToUnicode.stream]
-		unichr2cid = dict(reversed(entry) for entry in cmap.cid2unichr.items())
-		replacement_cid = list(cmap.cid2unichr)[0] # the first CID value
-		def to_bytes(c):
-			return [int(c/256), c & 255]
-		byte_string = sum([to_bytes(unichr2cid.get(c, replacement_cid)) for c in string], [])
-
-		# Convert the byte string to a bytes (Py3) or str (Py2) instance.
-		from struct import pack
-		string = b''.join(pack("B", b) for b in byte_string)
+		string = cmap.encode(string)
 
 	# Convert using a simple encoding.
 	elif font.Encoding == "/WinAnsiEncoding":
@@ -568,15 +749,22 @@ def update_text_layer(options, text_content, text_map, page_tokens):
 def apply_updated_text(document, text_content, text_map, page_tokens):
 	# Create a new content stream for each page by concatenating the
 	# tokens in the page_tokens lists.
-	from pdfrw import PdfDict
+	from pdfrw import PdfDict, PdfArray
 	for i, page in enumerate(document.pages):
 		if page.Contents is None: continue # nothing was here
 
 		# Replace the page's content stream with our updated tokens.
 		# The content stream may have been an array of streams before,
-		# so replace the whole thing with a single new stream.
+		# so replace the whole thing with a single new stream. Unfortunately
+		# the str on PdfArray and PdfDict doesn't work right.
+		def tok_str(tok):
+			if isinstance(tok, PdfArray):
+				return "[ " + " ".join(tok_str(x) for x in tok) + "] "
+			if isinstance(tok, PdfDict):
+				return "<< " + " ".join(tok_str(x) + " " + tok_str(y) for x,y in tok.items()) + ">> "
+			return str(tok)
 		page.Contents = PdfDict()
-		page.Contents.stream = "\n".join(str(tok) for tok in page_tokens[i])
+		page.Contents.stream = "\n".join(tok_str(tok) for tok in page_tokens[i])
 		page.Contents.Length = len(page.Contents.stream) # reset
 
 if __name__ == "__main__":

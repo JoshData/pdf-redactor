@@ -26,17 +26,8 @@ You can:
 Get this module and then install its dependencies with:
 
 	pip3 install -r requirements.txt
-	(for Python 2, replace `pdfminer3k` with `pdfminer` in `requirements.txt`)
 
 `pdf_redactor.py` processes a PDF given on standard input and writes a new, redacted PDF to standard output.
-
-Because pdfrw doesn't support content stream compression, you should use a tool like [qpdf](http://qpdf.sourceforge.net/) to decompress the PDF prior to using this tool, and then to re-compress and web-optimize (linearize) the PDF after. The full command would be something like:
-
-	qpdf --stream-data=uncompress document.pdf - \
-	 | python3 pdf_redactor.py > /tmp/temp.pdf
-	 && qpdf --linearize /tmp/tmp.pdf document-redacted.pdf
-
-(qpdf's first argument can't be standard input, unfortunately, so a one-liner isn't possible.)
 
 However, you should use the `pdf_redactor` module as a library and pass in text filtering functions written in Python, since the command-line version of the tool does not yet actually do anything to the PDF. That means you should make your own main module like this:
 
@@ -74,6 +65,18 @@ However, you should use the `pdf_redactor` module as a library and pass in text 
 and then run `python3 your_module.py` instead of executing `pdf_redactor.py` directly.
 
 ## Limitations
+
+### Content Stream Compression
+
+Because pdfrw doesn't support all content stream compression methods, you should use a tool like [qpdf](http://qpdf.sourceforge.net/) to decompress the PDF prior to using this tool, and then to re-compress and web-optimize (linearize) the PDF after. The full command would be something like:
+
+	qpdf --stream-data=uncompress document.pdf - \
+	 | python3 pdf_redactor.py > /tmp/temp.pdf
+	 && qpdf --linearize /tmp/temp.pdf document-redacted.pdf
+
+(qpdf's first argument can't be standard input, unfortunately, so a one-liner isn't possible.)
+
+### Other limitations
 
 This tool has a limited understanding of glyph-to-Unicode codepoint mappings.
 
