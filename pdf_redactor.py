@@ -317,8 +317,7 @@ def build_text_layer(document, options):
 	from pdfrw.uncompress import uncompress as uncompress_streams
 	from pdfrw.objects.pdfname import BasePdfName
 
-	text_content = []
-	text_map = []
+	text_tokens = []
 	fontcache = { }
 
 	class TextToken:
@@ -344,8 +343,7 @@ def build_text_layer(document, options):
 
 	def process_text(token):
 		if token.value == "": return
-		text_content.append(token.value)
-		text_map.append((len(token.value), token))
+		text_tokens.append(token)
 
 	# For each page...
 	page_tokens = []
@@ -429,10 +427,7 @@ def build_text_layer(document, options):
 				prev_prev_token = prev_token
 				prev_token = token
 
-	# Join all of the strings together.
-	text_content = "".join(text_content)
-
-	return (text_content, text_map, page_tokens)
+	return (text_tokens, page_tokens)
 
 
 def chunk_pairs(s):
@@ -677,18 +672,18 @@ def fromUnicode(string, font, fontcache, options):
 
 	return string
 
-def update_text_layer(options, text_content, text_map, page_tokens):
-	if len(text_map) == 0:
+def update_text_layer(options, text_tokens, page_tokens):
+	if len(text_tokens) == 0:
 		# No text content.
 		return
 
 	# Apply each regular expression to the text content...
 	for pattern, function in options.content_filters:
 		# Finding all matches...
-		text_map_index = 0
-		text_map_charpos = 0
-		text_map_token_xdiff = 0
-		text_content_xdiff = 0
+		text_tokens_index = 0
+		text_tokens_charpos = 0
+		text_tokens_token_xdiff = 0
+		text_content = "".join(t.value for t in text_tokens)
 		for m in pattern.finditer(text_content):
 			# We got a match at text_content[i1:i2].
 			i1 = m.start()
@@ -703,23 +698,25 @@ def update_text_layer(options, text_content, text_map, page_tokens):
 				# Find the original tokens in the content stream that
 				# produced the matched text. Start by advancing over any
 				# tokens that are entirely before this span of text.
-				while text_map_charpos + text_map[text_map_index][0] <= i1:
-					text_map_charpos += text_map[text_map_index][0]
-					text_map_index += 1
-					text_map_token_xdiff = 0
-				assert(text_map_charpos <= i1)
+				while text_tokens_index < len(text_tokens) and \
+				      text_tokens_charpos + len(text_tokens[text_tokens_index].value)-text_tokens_token_xdiff <= i1:
+					text_tokens_charpos += len(text_tokens[text_tokens_index].value)-text_tokens_token_xdiff
+					text_tokens_index += 1
+					text_tokens_token_xdiff = 0
+				if text_tokens_index == len(text_tokens): break
+				assert(text_tokens_charpos <= i1)
 
-				# The token at text_map_index, and possibly subsequent ones,
+				# The token at text_tokens_index, and possibly subsequent ones,
 				# are responsible for this text. Replace the matched content
 				# here with replacement content.
-				tok = text_map[text_map_index][1]
+				tok = text_tokens[text_tokens_index]
 
 				# Where does this match begin within the token's text content?
-				mpos = i1 - text_map_charpos - text_map_token_xdiff
+				mpos = i1 - text_tokens_charpos
 				assert mpos >= 0
 
 				# How long is the match within this token?
-				mlen = min(i2-i1, len(tok.value)-mpos)
+				mlen = min(i2-i1, len(tok.value)-text_tokens_token_xdiff-mpos)
 				assert mlen >= 0
 
 				# How much should we replace here?
@@ -735,18 +732,13 @@ def update_text_layer(options, text_content, text_map, page_tokens):
 					replacement = None # sanity
 
 				# Do the replacement.
-				tok.value = tok.value[:mpos] + r + tok.value[mpos+mlen:]
-				text_map_token_xdiff += len(r) - mlen
-
-				# Also replace the text_content so that if we have multiple regexes
-				# the later regexes see content that matches the tokens.
-				text_content = text_content[0:i1+text_content_xdiff] + r + text_content[i2+text_content_xdiff:]
-				text_content_xdiff += len(r) - mlen
+				tok.value = tok.value[:mpos+text_tokens_token_xdiff] + r + tok.value[mpos+mlen+text_tokens_token_xdiff:]
+				text_tokens_token_xdiff += len(r) - mlen
 
 				# Avance for next iteration.
 				i1 += mlen
 
-def apply_updated_text(document, text_content, text_map, page_tokens):
+def apply_updated_text(document, text_tokens, page_tokens):
 	# Create a new content stream for each page by concatenating the
 	# tokens in the page_tokens lists.
 	from pdfrw import PdfDict, PdfArray
