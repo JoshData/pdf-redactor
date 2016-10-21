@@ -43,7 +43,7 @@ class RedactorOptions:
 	# functions defined, which is useful to remove all unrecognized fields.
 	#
 	# Use "ALL" to appy functions to all metadata fields, after any field-specific
-	# functions or DEFAULt functions are run.
+	# functions or DEFAULT functions are run.
 	metadata_filters = { }
 
 	# The XMP metadata filters are functions that are passed any existing XMP data and
@@ -185,7 +185,7 @@ def update_metadata(trailer, options):
 				# Convert datetime into a PDF "D" string format.
 				value = value.strftime("%Y%m%d%H%M%S%z")
 				if len(value) == 19:
-					# If TZ info was include, add an apostrophe between the hour/minutes offsets.
+					# If TZ info was included, add an apostrophe between the hour/minutes offsets.
 					value = value[:17] + "'" + value[17:]
 				value = PdfString("(D:%s)" % value)
 
@@ -223,7 +223,7 @@ def update_xmp_metadata(trailer, options):
 		# Get the serializer.
 		serializer = options.xmp_serializer
 		if serializer is None:
-			# Use a default serializer based on xml.etree.ElementTre.tostring.
+			# Use a default serializer based on xml.etree.ElementTree.tostring.
 			def serializer(xml_root):
 				import xml.etree.ElementTree
 				if hasattr(xml.etree.ElementTree, 'register_namespace'):
@@ -243,37 +243,38 @@ def update_xmp_metadata(trailer, options):
 		trailer.Root.Metadata.stream = serializer(value)
 
 
-def tokenize_stream(stream):
+def tokenize_streams(streams):
 	# pdfrw's tokenizer PdfTokens does lexical analysis only. But we need
 	# to collapse arrays ([ .. ]) and dictionaries (<< ... >>) into single
 	# token entries.
 	from pdfrw import PdfTokens, PdfDict, PdfArray
 	stack = []
-	for token in iter(PdfTokens(stream)):
-		# Is this a control token?
-		if token == "<<":
-			# begins a dictionary
-			stack.append((PdfDict, []))
-			continue
-		elif token == "[":
-			# begins an array
-			stack.append((PdfArray, []))
-			continue
-		elif token in (">>", "]"):
-			# ends a dictionary or array
-			constructor, content = stack.pop(-1)
-			if constructor == PdfDict:
-				# Turn flat list into key/value pairs.
-				content = chunk_pairs(content)
-			token = constructor(content)
+	for stream in streams:
+		for token in iter(PdfTokens(stream)):
+			# Is this a control token?
+			if token == "<<":
+				# begins a dictionary
+				stack.append((PdfDict, []))
+				continue
+			elif token == "[":
+				# begins an array
+				stack.append((PdfArray, []))
+				continue
+			elif token in (">>", "]"):
+				# ends a dictionary or array
+				constructor, content = stack.pop(-1)
+				if constructor == PdfDict:
+					# Turn flat list into key/value pairs.
+					content = chunk_pairs(content)
+				token = constructor(content)
 
-		# If we're inside something, add this token to that thing.
-		if len(stack) > 0:
-			stack[-1][1].append(token)
-			continue
+			# If we're inside something, add this token to that thing.
+			if len(stack) > 0:
+				stack[-1][1].append(token)
+				continue
 
-		# Yield it.
-		yield token
+			# Yield it.
+			yield token
 
 
 def build_text_layer(document, options):
@@ -385,47 +386,45 @@ def build_text_layer(document, options):
 					fontcache.setdefault(current_font.BaseFont, set()).update(token.value)
 			return token
 
-		# Iterate through the page's content streams.
-		for content in contents:
-			# Iterate through the tokens.
-			for token in tokenize_stream(content.stream):
-				# Replace any string token with our own class that hold a mutable
-				# value, which is how we'll rewrite content.
-				token = make_mutable_string_token(token)
+		# Iterate through the tokens in the page's content streams.
+		for token in tokenize_streams(content.stream for content in contents):
+			# Replace any string token with our own class that hold a mutable
+			# value, which is how we'll rewrite content.
+			token = make_mutable_string_token(token)
 
-				# Append the token into a new list that holds all tokens.
-				token_list.append(token)
+			# Append the token into a new list that holds all tokens.
+			token_list.append(token)
 
-				# If the token is an operator and we're not inside an array...
-				if isinstance(token, PdfObject):
-					# And it's one that we recognize, process it.
-					if token in ("Tj", "'", '"') and isinstance(prev_token, TextToken):
-						# Simple text operators.
-						process_text(prev_token)
-					elif token == "TJ" and isinstance(prev_token, PdfArray):
-						# The text array operator.
-						for i in range(len(prev_token)):
-							# (item may not be a string! only the strings are text.)
-							prev_token[i] = make_mutable_string_token(prev_token[i])
-							if isinstance(prev_token[i], TextToken):
-								process_text(prev_token[i])
+			# If the token is an operator and we're not inside an array...
+			if isinstance(token, PdfObject):
+				# And it's one that we recognize, process it.
+				if token in ("Tj", "'", '"') and isinstance(prev_token, TextToken):
+					# Simple text operators.
+					process_text(prev_token)
+				elif token == "TJ" and isinstance(prev_token, PdfArray):
+					# The text array operator.
+					for i in range(len(prev_token)):
+						# (item may not be a string! only the strings are text.)
+						prev_token[i] = make_mutable_string_token(prev_token[i])
+						if isinstance(prev_token[i], TextToken):
+							process_text(prev_token[i])
 
-					elif token == "Tf" and isinstance(prev_prev_token, BasePdfName):
-						# Update the current font.
-						# prev_prev_token holds the font 'name'. The name must be looked up
-						# in the content stream's resource dictionary, which is page.Resources,
-						# plus any resource dictionaries above it in the document hierarchy.
-						current_font = None
-						resources = page.Resources
-						while resources and not current_font:
-							current_font = resources.Font[prev_prev_token]
-							resources = resources.Parent
+				elif token == "Tf" and isinstance(prev_prev_token, BasePdfName):
+					# Update the current font.
+					# prev_prev_token holds the font 'name'. The name must be looked up
+					# in the content stream's resource dictionary, which is page.Resources,
+					# plus any resource dictionaries above it in the document hierarchy.
+					current_font = None
+					resources = page.Resources
+					while resources and not current_font:
+						current_font = resources.Font[prev_prev_token]
+						resources = resources.Parent
 
-				# Remember the previously seen token in case the next operator is a text-showing
-				# operator -- in which case this was the operand. Remember the token befor that
-				# because it may be a font name for the Tf operator.
-				prev_prev_token = prev_token
-				prev_token = token
+			# Remember the previously seen token in case the next operator is a text-showing
+			# operator -- in which case this was the operand. Remember the token before that
+			# because it may be a font name for the Tf operator.
+			prev_prev_token = prev_token
+			prev_token = token
 
 	return (text_tokens, page_tokens)
 
@@ -514,7 +513,7 @@ class CMap(object):
 			self.bytes_to_unicode[code] = char
 			self.unicode_to_bytes[char] = code
 
-		for token in tokenize_stream(cmap.stream):
+		for token in tokenize_streams([cmap.stream]):
 			if token == "begincmap":
 				in_cmap = True
 				operand_stack[:] = []
@@ -735,7 +734,7 @@ def update_text_layer(options, text_tokens, page_tokens):
 				tok.value = tok.value[:mpos+text_tokens_token_xdiff] + r + tok.value[mpos+mlen+text_tokens_token_xdiff:]
 				text_tokens_token_xdiff += len(r) - mlen
 
-				# Avance for next iteration.
+				# Advance for next iteration.
 				i1 += mlen
 
 def apply_updated_text(document, text_tokens, page_tokens):
