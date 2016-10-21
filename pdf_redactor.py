@@ -43,7 +43,7 @@ class RedactorOptions:
 	# functions defined, which is useful to remove all unrecognized fields.
 	#
 	# Use "ALL" to appy functions to all metadata fields, after any field-specific
-	# functions or DEFAULt functions are run.
+	# functions or DEFAULT functions are run.
 	metadata_filters = { }
 
 	# The XMP metadata filters are functions that are passed any existing XMP data and
@@ -185,7 +185,7 @@ def update_metadata(trailer, options):
 				# Convert datetime into a PDF "D" string format.
 				value = value.strftime("%Y%m%d%H%M%S%z")
 				if len(value) == 19:
-					# If TZ info was include, add an apostrophe between the hour/minutes offsets.
+					# If TZ info was included, add an apostrophe between the hour/minutes offsets.
 					value = value[:17] + "'" + value[17:]
 				value = PdfString("(D:%s)" % value)
 
@@ -223,7 +223,7 @@ def update_xmp_metadata(trailer, options):
 		# Get the serializer.
 		serializer = options.xmp_serializer
 		if serializer is None:
-			# Use a default serializer based on xml.etree.ElementTre.tostring.
+			# Use a default serializer based on xml.etree.ElementTree.tostring.
 			def serializer(xml_root):
 				import xml.etree.ElementTree
 				if hasattr(xml.etree.ElementTree, 'register_namespace'):
@@ -422,7 +422,7 @@ def build_text_layer(document, options):
 							resources = resources.Parent
 
 				# Remember the previously seen token in case the next operator is a text-showing
-				# operator -- in which case this was the operand. Remember the token befor that
+				# operator -- in which case this was the operand. Remember the token before that
 				# because it may be a font name for the Tf operator.
 				prev_prev_token = prev_token
 				prev_token = token
@@ -735,7 +735,7 @@ def update_text_layer(options, text_tokens, page_tokens):
 				tok.value = tok.value[:mpos+text_tokens_token_xdiff] + r + tok.value[mpos+mlen+text_tokens_token_xdiff:]
 				text_tokens_token_xdiff += len(r) - mlen
 
-				# Avance for next iteration.
+				# Advance for next iteration.
 				i1 += mlen
 
 def apply_updated_text(document, text_tokens, page_tokens):
