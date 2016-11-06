@@ -6,13 +6,22 @@ from __future__ import print_function
 
 import io
 import os
+import multiprocessing
 import pdfrw
-import xml.etree.ElementTree
 import re
 import sys
 import traceback
+import xml.etree.ElementTree
 
 import pdf_redactor
+
+try:
+	from tqdm import tqdm_gui as tqdm
+except ImportError:
+	try:
+		from tqdm import tqdm
+	except ImportError:
+		tqdm = lambda it: it
 
 
 def metadata_filter(value):
@@ -43,16 +52,24 @@ def smoke_test_file(path):
 		options.input_stream.close()
 
 
-def main(paths):
+def gen_filenames(paths):
 	for path in paths:
 		if os.path.isfile(path):
-			smoke_test_file(path)
+			yield path
 		elif os.path.isdir(path):
 			for dirpath, dirnames, filenames in os.walk(path):
 				for name in filenames:
 					if name.lower().endswith(".pdf"):
-						p = os.path.join(dirpath, name)
-						smoke_test_file(p)
+						yield os.path.join(dirpath, name)
+
+
+def main(paths):
+	with multiprocessing.Pool() as pool:
+		open_tasks = []
+		for fn in tqdm(list(gen_filenames(paths))):
+			open_tasks.append(pool.apply_async(smoke_test_file, [fn]))
+			if len(open_tasks) > 20:
+				open_tasks.pop(0).wait()
 
 if __name__ == "__main__":
 	main(sys.argv[1:])
