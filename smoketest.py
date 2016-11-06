@@ -70,6 +70,8 @@ def main(paths):
 			open_tasks.append(pool.apply_async(smoke_test_file, [fn]))
 			if len(open_tasks) > 20:
 				open_tasks.pop(0).wait()
+		pool.close()
+		pool.join()
 
 if __name__ == "__main__":
 	main(sys.argv[1:])
