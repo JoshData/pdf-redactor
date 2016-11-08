@@ -1,5 +1,6 @@
 # A general-purpose PDF text-layer redaction tool.
 
+from pdfrw import PdfDict
 import sys
 from datetime import datetime
 
@@ -111,7 +112,7 @@ def update_metadata(trailer, options):
 	# (the latter two containing Date values, the rest strings).
 
 	import codecs
-	from pdfrw.objects import PdfString, PdfName, PdfDict
+	from pdfrw.objects import PdfString, PdfName
 
 	# Create the metadata dict if it doesn't exist, since the caller may be adding fields.
 	if not trailer.Info:
@@ -236,21 +237,49 @@ def update_xmp_metadata(trailer, options):
 				return xml.etree.ElementTree.tostring(xml_root, encoding='unicode' if sys.version_info>=(3,0) else None)
 		
 		# Create a fresh Metadata dictionary and serialize the XML into it.
-		from pdfrw.objects import PdfDict
 		trailer.Root.Metadata = PdfDict()
 		trailer.Root.Metadata.Type = "Metadata"
 		trailer.Root.Metadata.Subtype = "XML"
 		trailer.Root.Metadata.stream = serializer(value)
 
 
+class InlineImage(PdfDict):
+	def read_data(self, tokens):
+		# "Unless the image uses ASCIIHexDecode or ASCII85Decode as one
+		# of its filters, the ID operator should be followed by a
+		# single white-space character, and the next character is
+		# interpreted as the first byte of image data.
+		if tokens.current[0][1] > tokens.current[0][0] + 3:
+			tokens.current[0] = (tokens.current[0][0],
+					tokens.current[0][0] + 3)
+
+		if self.IM:
+			components_per_pixel = 1
+		else:
+			raise Exception("Unsupported inline image color space")
+		width = int(self.W)
+		height = int(self.H)
+		bits_per_component = int(self.BPC)
+		bits_per_pixel = bits_per_component * components_per_pixel
+		if self.F is None:
+			length = (width * bits_per_pixel + 7) // 8 * height
+		else:
+			raise Exception("Unsupported inline image filter {}".format(self.F))
+		start = tokens.floc
+		end = start + length
+		self._stream = tokens.fdata[start:end]
+		tokens.floc = end
+
+
 def tokenize_streams(streams):
 	# pdfrw's tokenizer PdfTokens does lexical analysis only. But we need
 	# to collapse arrays ([ .. ]) and dictionaries (<< ... >>) into single
 	# token entries.
-	from pdfrw import PdfTokens, PdfDict, PdfArray
+	from pdfrw import PdfTokens, PdfArray
 	stack = []
 	for stream in streams:
-		for token in iter(PdfTokens(stream)):
+		tokens = PdfTokens(stream)
+		for token in tokens:
 			# Is this a control token?
 			if token == "<<":
 				# begins a dictionary
@@ -267,6 +296,21 @@ def tokenize_streams(streams):
 					# Turn flat list into key/value pairs.
 					content = chunk_pairs(content)
 				token = constructor(content)
+			elif token == "BI":
+				# begins an inline image's dictionary half
+				stack.append((InlineImage, []))
+				continue
+			elif token == "ID":
+				# divides an inline image's dictionary half and data half
+				constructor, content = stack[-1]
+				content = chunk_pairs(content)
+				img = constructor(content)
+				img.read_data(tokens)
+				stack[-1] = (img, None)
+				continue
+			elif token == "EI":
+				# ends an inline image
+				token, _ = stack.pop(-1)
 
 			# If we're inside something, add this token to that thing.
 			if len(stack) > 0:
@@ -740,7 +784,7 @@ def update_text_layer(options, text_tokens, page_tokens):
 def apply_updated_text(document, text_tokens, page_tokens):
 	# Create a new content stream for each page by concatenating the
 	# tokens in the page_tokens lists.
-	from pdfrw import PdfDict, PdfArray
+	from pdfrw import PdfArray
 	for i, page in enumerate(document.pages):
 		if page.Contents is None: continue # nothing was here
 
@@ -751,6 +795,8 @@ def apply_updated_text(document, text_tokens, page_tokens):
 		def tok_str(tok):
 			if isinstance(tok, PdfArray):
 				return "[ " + " ".join(tok_str(x) for x in tok) + "] "
+			if isinstance(tok, InlineImage):
+				return "BI " + " ".join(tok_str(x) + " " + tok_str(y) for x,y in tok.items()) + " ID " + tok.stream + " EI "
 			if isinstance(tok, PdfDict):
 				return "<< " + " ".join(tok_str(x) + " " + tok_str(y) for x,y in tok.items()) + ">> "
 			return str(tok)
