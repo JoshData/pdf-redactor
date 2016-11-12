@@ -253,20 +253,41 @@ class InlineImage(PdfDict):
 			tokens.current[0] = (tokens.current[0][0],
 					tokens.current[0][0] + 3)
 
-		if self.IM:
-			components_per_pixel = 1
-		else:
-			raise Exception("Unsupported inline image color space")
-		width = int(self.W)
-		height = int(self.H)
-		bits_per_component = int(self.BPC)
-		bits_per_pixel = bits_per_component * components_per_pixel
-		if self.F is None:
-			length = (width * bits_per_pixel + 7) // 8 * height
-		else:
-			raise Exception("Unsupported inline image filter {}".format(self.F))
 		start = tokens.floc
-		end = start + length
+		state = 0
+		whitespace = (" ", "\n", "\r")
+		# 0: image data or trailing whitespace
+		# 1: E
+		# 2: I
+		for i in range(start, len(tokens.fdata)):
+			if state == 0:
+				if tokens.fdata[i] == "E":
+					state = 1
+			elif state == 1:
+				if tokens.fdata[i] == "I":
+					state = 2
+				else:
+					state = 0
+			elif state == 2:
+				if tokens.fdata[i] in whitespace:
+					for j in range(i + 1, i + 6):
+						o = ord(tokens.fdata[j])
+						if o == 0x0A:  # \n
+							continue
+						elif o == 0x0D:  # \r
+							continue
+						elif o >= 0x20 and o <= 0x7E:
+							continue
+						else:
+							state = 0
+							break
+					else:
+						end = i - 3
+						assert tokens.fdata[end] in whitespace
+						break
+				else:
+					state = 0
+
 		self._stream = tokens.fdata[start:end]
 		tokens.floc = end
 
