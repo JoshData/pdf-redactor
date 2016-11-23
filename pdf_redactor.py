@@ -1,6 +1,5 @@
 # A general-purpose PDF text-layer redaction tool.
 
-from pdfrw import PdfDict
 import sys
 from datetime import datetime
 
@@ -8,10 +7,14 @@ if sys.version_info >= (3,):
 	# pdfrw is broken in Py 3 for xref tables. This monkeypatching fixes it
 	# by making binascii.hexlify work with a (unicode) string passed to it.
 	# Assume the string is Latin-1 encoded since that's what pdfrw assumes
-	# throughout.
+	# throughout. In order for this to work, binascii must be monkeypatched
+	# before pdfrw is imported because importing pdfrw will cause the pdfrw
+	# module to access the pre-monkeypatched binascii functions.
 	import binascii
 	original_hexlify = binascii.hexlify
 	binascii.hexlify = lambda x : original_hexlify(x if isinstance(x, bytes) else x.encode("latin-1"))
+
+from pdfrw import PdfDict
 
 class RedactorOptions:
 	"""Redaction and I/O options."""
