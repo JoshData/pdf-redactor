@@ -26,4 +26,9 @@ setup(
 		'pdfrw>=0.3',
 		'defusedxml',
 	],
+	tests_require=[
+		'nose',
+		'textract',
+	],
+	test_suite='tests.run_tests.main',
 )
