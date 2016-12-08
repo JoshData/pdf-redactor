@@ -31,7 +31,7 @@ options.xmp_filters = [lambda xml : None]
 options.content_filters = [
 	# First convert all dash-like characters to dashes.
 	(
-		re.compile(r"[−–—~‐]"),
+		re.compile(u"[−–—~‐]"),
 		lambda m : "-"
 	),
 

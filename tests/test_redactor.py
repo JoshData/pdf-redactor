@@ -23,7 +23,7 @@ class RedactorTest(unittest.TestCase):
 				options.output_stream = redacted_file
 				options.content_filters = [
 					(
-						re.compile(r"[−–—~‐]"),
+						re.compile(u"[−–—~‐]"),
 						lambda m: "-"
 					),
 					(
