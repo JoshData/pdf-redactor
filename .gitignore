@@ -1,2 +1,7 @@
 __pycache__
 *.pyc
+/build
+/dist
+/pdf_redactor.egg-info
+/.eggs
+/.tox

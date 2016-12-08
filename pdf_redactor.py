@@ -20,12 +20,8 @@ class RedactorOptions:
 	"""Redaction and I/O options."""
 
 	# Input/Output
-	if sys.version_info < (3,):
-		input_stream = sys.stdin # input stream containing the PDF to redact
-		output_stream = sys.stdout # output stream to write the new, redacted PDF to
-	else:
-		input_stream = sys.stdin.buffer # input byte stream containing the PDF to redact
-		output_stream = sys.stdout.buffer # output byte stream to write the new, redacted PDF to
+	input_stream = None
+	output_stream = None
 
 	# Metadata filters map names of entries in the PDF Document Information Dictionary
 	# (e.g. "Title", "Author", "Subject", "Keywords", "Creator", "Producer", "CreationDate",
@@ -81,6 +77,17 @@ class RedactorOptions:
 
 def redactor(options):
 	# This is the function that performs redaction.
+
+	if sys.version_info < (3,):
+		if options.input_stream is None:
+			options.input_stream = sys.stdin # input stream containing the PDF to redact
+		if options.output_stream is None:
+			options.output_stream = sys.stdout # output stream to write the new, redacted PDF to
+	else:
+		if options.input_stream is None:
+			options.input_stream = sys.stdin.buffer # input byte stream containing the PDF to redact
+		if options.output_stream is None:
+			options.output_stream = sys.stdout.buffer # output byte stream to write the new, redacted PDF to
 
 	from pdfrw import PdfReader, PdfWriter
 
