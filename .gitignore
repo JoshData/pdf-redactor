@@ -4,3 +4,4 @@ __pycache__
 /dist
 /pdf_redactor.egg-info
 /.eggs
+/.tox
