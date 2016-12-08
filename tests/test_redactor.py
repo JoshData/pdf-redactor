@@ -66,3 +66,32 @@ class RedactorTest(unittest.TestCase):
 		finally:
 			redacted_file.close()
 			os.unlink(redacted_path)
+
+	def test_xmp(self):
+		def xmp_filter(doc):
+			for elem in doc.iter():
+				if elem.text == "Writer":
+					elem.text = "Sentinel"
+			return doc
+
+		redacted_fd, redacted_path = tempfile.mkstemp(".pdf")
+		redacted_file = os.fdopen(redacted_fd, "wb")
+		try:
+			with open(FIXTURE_PATH, "rb") as f:
+				options = pdf_redactor.RedactorOptions()
+				options.input_stream = f
+				options.output_stream = redacted_file
+				options.metadata_filters = {
+					"DEFAULT": [lambda value: None],
+				}
+				options.xmp_filters = [xmp_filter]
+
+				pdf_redactor.redactor(options)
+				redacted_file.close()
+
+				metadata = subprocess.check_output(["pdfinfo", "-meta", redacted_path])
+				self.assertIn(b"Sentinel", metadata)
+				self.assertNotIn(b"Writer", metadata)
+		finally:
+			redacted_file.close()
+			os.unlink(redacted_path)
