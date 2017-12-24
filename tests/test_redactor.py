@@ -4,7 +4,6 @@ import pkg_resources
 import re
 import subprocess
 import tempfile
-import textract
 import unittest
 
 import pdf_redactor
@@ -37,6 +36,11 @@ class RedactFixture(object):
 		return False
 
 
+def pdf_to_text(fn):
+	import subprocess
+	return subprocess.check_output(["pdftotext", fn, "-"]).decode("utf8")
+
+
 class RedactorTest(unittest.TestCase):
 	def test_text_ssns(self):
 		options = pdf_redactor.RedactorOptions()
@@ -51,8 +55,8 @@ class RedactorTest(unittest.TestCase):
 			),
 		]
 		with RedactFixture(FIXTURE_PATH, options) as redacted_path:
-			text = textract.process(redacted_path)
-			self.assertIn(b"Here are some fake SSNs\n\nXXX-XX-XXXX\n--\n\nXXX-XX-XXXX XXX-XX-XXXX\n\nAnd some more with common OCR character substitutions:\nXXX-XX-XXXX XXX-XX-XXXX XXX-XX-XXXX XXX-XX-XXXX XXX-XX-XXXX", text)
+			text = pdf_to_text(redacted_path)
+			self.assertIn("Here are some fake SSNs\n\nXXX-XX-XXXX\n--\n\nXXX-XX-XXXX XXX-XX-XXXX\n\nAnd some more with common OCR character substitutions:\nXXX-XX-XXXX XXX-XX-XXXX XXX-XX-XXXX XXX-XX-XXXX XXX-XX-XXXX", text)
 
 	def test_metadata(self):
 		options = pdf_redactor.RedactorOptions()

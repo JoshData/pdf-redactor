@@ -1,2 +1,2 @@
-pdfrw>=0.3
+pdfrw>=0.4
 defusedxml

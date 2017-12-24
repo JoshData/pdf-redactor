@@ -3,17 +3,6 @@
 import sys
 from datetime import datetime
 
-if sys.version_info >= (3,):
-	# pdfrw is broken in Py 3 for xref tables. This monkeypatching fixes it
-	# by making binascii.hexlify work with a (unicode) string passed to it.
-	# Assume the string is Latin-1 encoded since that's what pdfrw assumes
-	# throughout. In order for this to work, binascii must be monkeypatched
-	# before pdfrw is imported because importing pdfrw will cause the pdfrw
-	# module to access the pre-monkeypatched binascii functions.
-	import binascii
-	original_hexlify = binascii.hexlify
-	binascii.hexlify = lambda x : original_hexlify(x if isinstance(x, bytes) else x.encode("latin-1"))
-
 from pdfrw import PdfDict
 
 class RedactorOptions:
@@ -152,45 +141,13 @@ def update_metadata(trailer, options):
 				# decode from PDF's "(...)" syntax.
 				value = value.decode()
 
-				# If it's a UTF-16BE string --- indicated with a BOM --- then decode it too.
-				# In Py 3, pdfrw has decoded the string already as if it were Latin-1, so we
-				# have to first go back to bytes.
-				if sys.version_info >= (3,):
-					# Decode in Py3 only.
-					value_ = value.encode("Latin-1")
-				else:
-					value_ = value
-				if value_.startswith(codecs.BOM_UTF16_BE):
-					value = value_.decode("UTF-16BE")[1:] # remove BOM after decoding
-
 			# Filter the value.
 			value = f(value)
 
 			# Convert Python data type to PdfString.
-			if isinstance(value, str):
+			if isinstance(value, str) or (sys.version_info < (3,) and isinstance(value, unicode)):
 				# Convert string to a PdfString instance.
-				#
-				# PDFs have two string serialization formats: PDFDocEncoding and UTF-16BE with a BOM.
-				# PDFDocEncoding is very similar or identical to Latin-1 (I'm not sure).
-				#
-				# In Py3, pdfrw will serialize every string using Latin-1. We must check that
-				# that will be possible --- the str might contain other Unicode characters.
-				# If it's not possible, we can trick it into serializing as UTF-16BE with a BOM
-				# by decoding it as if it were Latin-1.
-				try:
-					value.encode("Latin-1").decode("Latin-1")
-					# Ok Latin-1 works fine.
-				except ValueError:
-					# String contains non-Latin-1 characters. Serialize as UTF-16BE with a BOM
-					# and then decode it as if it were Latin-1, so that when pdfrw writes it
-					# back out it comes out correct as UTF-16BE again.
-					value = (codecs.BOM_UTF16_BE + value.encode("UTF-16BE")).decode("latin1")
-				value = PdfString.encode(value)
-
-			elif sys.version_info < (3,) and isinstance(value, unicode):
-				# This is a Py 2 Unicode instance. PDF allows this to be serialized to
-				# UTF-16BE with a BOM.
-				value = PdfString.encode(codecs.BOM_UTF16_BE + value.encode("UTF-16BE"))
+				value = PdfString.from_unicode(value)
 
 			elif isinstance(value, datetime):
 				# Convert datetime into a PDF "D" string format.
@@ -203,6 +160,7 @@ def update_metadata(trailer, options):
 			elif value is None:
 				# delete the metadata value
 				pass
+
 			else:
 				raise ValueError("Invalid type of value returned by metadata_filter function. %s was returned by %s." %
 					(repr(value), f.__name__ or "anonymous function"))
@@ -408,11 +366,11 @@ def build_text_layer(document, options):
 			# __str__ is used for serialization
 			if self.value == self.original_value:
 				# If unchanged, return the raw original value without decoding/encoding.
-				return PdfString.encode(self.raw_original_value)
+				return PdfString.from_bytes(self.raw_original_value)
 			else:
 				# If the value changed, encode it from Unicode according to the encoding
 				# of the font that is active at the location of this token.
-				return PdfString.encode(fromUnicode(self.value, self.font, fontcache, options))
+				return PdfString.from_bytes(fromUnicode(self.value, self.font, fontcache, options))
 		def __repr__(self):
 			# __repr__ is used for debugging
 			return "Token<%s>" % repr(self.value)
@@ -452,7 +410,7 @@ def build_text_layer(document, options):
 
 		def make_mutable_string_token(token):
 			if isinstance(token, PdfString):
-				token = TextToken(token.decode(), current_font)
+				token = TextToken(token.to_bytes(), current_font)
 
 				# Remember all unicode characters seen in this font so we can
 				# avoid inserting characters that the PDF isn't likely to have
@@ -536,15 +494,16 @@ class CMap(object):
 
 		def code_to_int(code):
 			# decode hex encoding
-			code = code.decode()
-			code = (ord(c) for c in code)
+			code = code.to_bytes()
+			if sys.version_info < (3,):
+				code = (ord(c) for c in code)
 			from functools import reduce
 			return reduce(lambda x0, x : x0*256 + x, (b for b in code))
 
 		def add_mapping(code, char, offset=0):
 			# Is this a mapping for a one-byte or two-byte character code?
-			width = len(codespacerange[0].decode())
-			assert len(codespacerange[1].decode()) == width
+			width = len(codespacerange[0].to_bytes())
+			assert len(codespacerange[1].to_bytes()) == width
 			if width == 1:
 				# one-byte entry
 				if sys.version_info < (3,):
@@ -566,14 +525,8 @@ class CMap(object):
 			# The Unicode character is given usually as a hex string of one or more
 			# two-byte Unicode code points.
 			if isinstance(char, PdfString):
-				char = char.decode()
-
-				# char now holds a str whose characters are actually bytes. We need
-				# to re-code the two-byte sequences as Unicode characters.
-				if sys.version_info < (3,):
-					char = (ord(c) for c in char)
-				else:
-					char = char.encode("latin-1") # pdfrw encodes everything
+				char = char.to_bytes()
+				if sys.version_info < (3,): char = (ord(c) for c in char)
 
 				c = ""
 				for xh, xl in chunk_pairs(list(char)):
@@ -670,11 +623,6 @@ class CMap(object):
 def toUnicode(string, font, fontcache):
 	# This is hard!
 
-	# In Py3, pdfrw decodes the whole stream as if it were Latin1. That's never
-	# really the right encoding for fonts. Put it back to the original bytes.
-	if sys.version_info >= (3,):
-		string = string.encode("Latin-1")
-
 	if not font:
 		# There is no font for this text. Assume Latin-1.
 		return string.decode("Latin-1")
@@ -686,10 +634,9 @@ def toUnicode(string, font, fontcache):
 
 		# Use the CMap, which maps character codes to Unicode code points.
 		if font.ToUnicode.stream not in fontcache:
-			#print(font.ToUnicode.stream, file=sys.stderr)
-			#cmap.dump(sys.stderr)
 			fontcache[font.ToUnicode.stream] = CMap(font.ToUnicode)
 		cmap = fontcache[font.ToUnicode.stream]
+
 		string = cmap.decode(string)
 		#print(string, end='', file=sys.stderr)
 		#sys.stderr.write(string)
@@ -722,29 +669,22 @@ def fromUnicode(string, font, fontcache, options):
 	# used in a text-showing operation.
 	if not font:
 		# There was no font for this text. Assume Latin-1.
-		string = string.encode("Latin-1")
+		return string.encode("Latin-1")
 
 	elif font.ToUnicode and font.ToUnicode.stream in fontcache:
 		# Convert the Unicode code points back to one/two-byte CIDs.
 		cmap = fontcache[font.ToUnicode.stream]
-		string = cmap.encode(string)
+		return cmap.encode(string)
 
 	# Convert using a simple encoding.
 	elif font.Encoding == "/WinAnsiEncoding":
-		string = string.encode("cp1252")
+		return string.encode("cp1252")
 	elif font.Encoding == "/MacRomanEncoding":
-		string = string.encode("mac_roman")
+		return string.encode("mac_roman")
 
 	# Don't know how to handle this sort of font.
 	else:
 		raise ValueError("Don't know how to encode data to font %s." % font)
-
-	# In Py3, pdfrw encodes the whole stream back into Latin-1. We need to
-	# get these bytes through, so decode as if it were Latin-1.
-	if sys.version_info >= (3,):
-		string = string.decode("Latin-1")
-
-	return string
 
 def update_text_layer(options, text_tokens, page_tokens):
 	if len(text_tokens) == 0:

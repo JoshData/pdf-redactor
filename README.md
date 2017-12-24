@@ -60,3 +60,10 @@ If you're redacting metadata, you should check the output using `pdfinfo` from t
 	# check that the metadata is fully redacted
 	pdfinfo -meta document-redacted.pdf
 
+## Developing/testing the library
+
+Tests require some additional packages:
+
+	pip install -r requirements-dev.txt
+	python tests/run_tests.py
+	
