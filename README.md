@@ -57,7 +57,7 @@ Because pdfrw doesn't support all content stream compression methods, you should
 
 ### Other limitations
 
-This tool has a limited understanding of glyph-to-Unicode codepoint mappings.
+This tool has a limited understanding of glyph-to-Unicode codepoint mappings. Some unusual fonts may not be processed correctly, in which case text layer redaction regular expressions may not match or substitution text may not render correctly.
 
 ## Testing that it worked
 
