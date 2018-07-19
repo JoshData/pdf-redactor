@@ -39,6 +39,19 @@ However, you should use the `pdf_redactor` module as a library and pass in text 
 
 ## Limitations
 
+### Not all content may be redacted
+
+The PDF format is an incredibly complex data standard that has hundreds, if not thousands,
+of exotic capabilities used rarely or in specialized circumstances. Besides a document's text layer, metadata, and other components of a PDF document which this tool scans and can redact text from, there are many other components of PDF documents that this tool **does not look at**, such as:
+
+* embedded files, multimedia, and scripts
+* rich text annotations
+* forms
+* internal object names
+* digital signatures
+
+There are so many exotic capabilities in PDF documents that it would be difficult to list them all, so this list is a very partial list. It would take a lot more effort to write a redaction tool that scanned all posssible places content can be hidden inside a PDF besides the places that this tool looks at, so please be aware that it is **your responsibility** to ensure that the PDFs you use this tool on only use the capabilities of the PDF format that this tool knows how to redact.
+
 ### Character replacement
 
 One of the PDF format's strengths is that it embeds font information so that documents can be displayed even if the fonts used to create the PDF aren't available when the PDF is viewed. Most PDFs are optimized to only embed the font information for characters that are actually used in the document. So if a document doesn't contain a particular letter or symbol, information for rendering the letter or symbol is not stored in the PDF.
@@ -47,7 +60,7 @@ This has an unfortunate consequence for redaction in the text layer. Since redac
 
 To get around this problem, pdf_redactor checks your replacement text for new characters and replaces them with characters from the `content_replacement_glyphs` list (defaulting to `?`, `#`, `*`, and a space) if any of those characters _are_ present in the font information already stored in the PDF. Hopefully at least one of those characters _is_ present (maybe none are!), and in that case your replacement text will at least show up as something and not disappear.
 
-### Content Stream Compression
+### Content stream compression
 
 Because pdfrw doesn't support all content stream compression methods, you should use a tool like [qpdf](http://qpdf.sourceforge.net/) to decompress the PDF prior to using this tool, and then to re-compress and web-optimize (linearize) the PDF after. The full command would be something like:
 
@@ -57,7 +70,7 @@ Because pdfrw doesn't support all content stream compression methods, you should
 
 (qpdf's first argument can't be standard input, unfortunately, so a one-liner isn't possible.)
 
-### Other limitations
+### Exotic fonts
 
 This tool has a limited understanding of glyph-to-Unicode codepoint mappings. Some unusual fonts may not be processed correctly, in which case text layer redaction regular expressions may not match or substitution text may not render correctly.
 
