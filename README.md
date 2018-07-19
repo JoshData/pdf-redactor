@@ -51,8 +51,6 @@ Because pdfrw doesn't support all content stream compression methods, you should
 
 This tool has a limited understanding of glyph-to-Unicode codepoint mappings.
 
-pdfrw is also kind of broken in Python 3 because it improperly round-trips the entire PDF through Latin-1 encoding. I've monkey-patched it here and done some tricks to get around it. While I recommend sticking with Python 3, this module should also work with Python 2.
-
 ## Testing that it worked
 
 If you're redacting metadata, you should check the output using `pdfinfo` from the `poppler-utils` package:
