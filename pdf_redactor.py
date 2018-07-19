@@ -46,7 +46,8 @@ class RedactorOptions:
 	# (a unicode string --- don't serialize to bytes).
 	xmp_serializer = None
 
-	# The content filters are run on the combined content streams of the pages.
+	# The content filters are run on the combined content streams of the pages, as well
+	# as on each annotation's text attributes separately.
 	#
 	# Each filter is a tuple of a compiled regular expression and a function to generate
 	# replacement text, which is given a re.Match object as its sole argument. It must return a string.
@@ -62,6 +63,12 @@ class RedactorOptions:
 	# replace the character with these other characters (if they don't have the same
 	# problem):
 	content_replacement_glyphs = ['?', '#', '*', ' ']
+
+	# The link filters are run on link annotations. Each link filter is a function
+	# that is passed the link target (a string holding a URI) and a second argujment
+	# holding the annotation object. The function should return a new URI or None to
+	# remove the link.
+	link_filters = []
 
 
 def redactor(options):
@@ -98,6 +105,9 @@ def redactor(options):
 
 		# Replace page content streams with updated tokens.
 		apply_updated_text(document, *text_layer)
+
+	# Update annotations.
+	update_annotations(document, options)
 
 	# Write the PDF back out.
 	writer = PdfWriter()
@@ -774,6 +784,71 @@ def apply_updated_text(document, text_tokens, page_tokens):
 		page.Contents = PdfDict()
 		page.Contents.stream = "\n".join(tok_str(tok) for tok in page_tokens[i])
 		page.Contents.Length = len(page.Contents.stream) # reset
+
+
+def update_annotations(document, options):
+	for page in document.pages:
+		if hasattr(page, 'Annots') and isinstance(page.Annots, list):
+			for annotation in page.Annots:
+				update_annotation(annotation, options)
+
+def update_annotation(annotation, options):
+	import re
+	from pdfrw.objects import PdfString
+
+	# Contents holds a plain-text representation of the annotation
+	# content, such as for accessibility. All annotation types may
+	# have a Contents. NM holds the "annotation name" which also
+	# could have redactable text, I suppose. Markup annotations have
+	# "T" fields that hold a title / text label. Subj holds a
+	# comment subject. CA, RC, and AC are used in widget annotations.
+	for string_field in ("Contents", "NM", "T", "Subj", "CA", "RC", "AC"):
+		if getattr(annotation, string_field):
+			value = getattr(annotation, string_field).to_unicode()
+			for pattern, function in options.content_filters:
+				value = pattern.sub(function, value)
+			setattr(annotation, string_field, PdfString.from_unicode(value))
+
+	# A rich-text stream. Not implemented. Bail so that we don't
+	# accidentally leak something that should be redacted.
+	if annotation.RC:
+		raise ValueError("Annotation rich-text streams (Annot/RC) are not supported.")
+
+	# An action, usually used for links.
+	if annotation.A:
+		update_annotation_action(annotation, annotation.A, options)
+	if annotation.PA:
+		update_annotation_action(annotation, annotation.PA, options)
+
+	# If set, another annotation.
+	if annotation.Popup:
+		update_annotation(annotation.Popup, options)
+
+	# TODO? Redaction annotations have some other attributes that might
+	# have text. But since they're intended for redaction... maybe we
+	# should keep them anyway.
+
+def update_annotation_action(annotation, action, options):
+	from pdfrw.objects import PdfString
+
+	if action.URI and options.link_filters:
+		value = action.URI.to_unicode()
+		for func in options.link_filters:
+			value = func(value, annotation)
+		if value is None:
+			# Remove annotation by supressing the action.
+			action.URI = None
+		else:
+			action.URI = PdfString.from_unicode(value)
+
+	if action.Next:
+		# May be an Action or array of Actions to execute next.
+		next_action = action.Next
+		if isinstance(action.Next, dict):
+			next_action = [action.Next]
+		for a in next_action:
+			update_annotation_action(annotation, a, options)
+
 
 if __name__ == "__main__":
 	redactor(RedactorOptions())

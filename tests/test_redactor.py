@@ -40,6 +40,9 @@ def pdf_to_text(fn):
 	import subprocess
 	return subprocess.check_output(["pdftotext", fn, "-"]).decode("utf8")
 
+def pdf_to_html(fn):
+	import subprocess
+	return subprocess.check_output(["pdftohtml", "-stdout", fn]).decode("utf8")
 
 class RedactorTest(unittest.TestCase):
 	def test_text_ssns(self):
@@ -78,6 +81,7 @@ class RedactorTest(unittest.TestCase):
 			"DEFAULT": [lambda value: None],
 		}
 		def xmp_filter(doc):
+			self.assertTrue(doc is not None)
 			for elem in doc.iter():
 				if elem.text == "Writer":
 					elem.text = "Sentinel"
@@ -87,3 +91,45 @@ class RedactorTest(unittest.TestCase):
 			metadata = subprocess.check_output(["pdfinfo", "-meta", redacted_path])
 			self.assertIn(b"Sentinel", metadata)
 			self.assertNotIn(b"Writer", metadata)
+
+	def test_link(self):
+		options = pdf_redactor.RedactorOptions()
+		options.content_filters = [
+			# replacement for the link text
+			(
+				re.compile(re.escape(u"link to issue #13")),
+				lambda m: "this link was removed"
+			),
+		]
+		options.link_filters = [
+			lambda href, annotation : "https://www.google.com" 
+		]
+		with RedactFixture(FIXTURE_PATH, options) as redacted_path:
+			text = pdf_to_text(redacted_path)
+			self.assertNotIn("link to issue #13", text)
+			self.assertIn("this link was re#o#e#", text) # glyph replacements	
+
+			html = pdf_to_html(redacted_path)
+			self.assertNotIn("github", html)
+			self.assertIn('href="https://www.google.com"', html)
+
+	def test_comment(self):
+		options = pdf_redactor.RedactorOptions()
+		options.content_filters = [
+			# replacement for the comment text
+			(
+				re.compile(re.escape(u"I have a comment!")),
+				lambda m: "all gone"
+			),
+
+			# replacement for the comment title
+			(
+				re.compile(re.escape(u"Unknown Author")),
+				lambda m: "Some Person"
+			),
+		]
+		with RedactFixture(FIXTURE_PATH, options) as redacted_path:
+			text = pdf_to_text(redacted_path)
+			# TODO: Test that the comment text and title have been replaced!
+			# Unfortunately no easy-to-run tool seems to extract
+			# comments.

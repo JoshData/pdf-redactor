@@ -10,6 +10,8 @@ pdf-redactor uses [pdfrw](https://github.com/pmaupin/pdfrw) under the hood to pa
 This Python module is a general tool to help you automatically redact text from PDFs. The tool operates on:
 
 * the text layer of the document's pages (content stream text)
+* plain text annotations
+* link target URLs
 * the Document Information Dictionary, a.k.a. the PDF metadata like Title and Author
 * embedded XMP metadata, if present
 
@@ -72,4 +74,5 @@ Tests require some additional packages:
 
 	pip install -r requirements-dev.txt
 	python tests/run_tests.py
-	
+
+The file `tests/test-ssns.pdf` was generating by converting the file `tests/test-ssns.odft` to PDF in LibreOffice with the `Archive PDF/A-1a` option turned on so that it generates XMP metadata and `Export comments` turned on to export the comment.
