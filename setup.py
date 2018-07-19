@@ -41,7 +41,7 @@ setup(
 		'Topic :: Utilities',
 	],
 	install_requires=[
-		'pdfrw>=0.3',
+		'pdfrw>=0.4',
 		'defusedxml',
 	],
 	tests_require=[
