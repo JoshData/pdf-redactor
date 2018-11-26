@@ -380,7 +380,7 @@ def build_text_layer(document, options):
 			else:
 				# If the value changed, encode it from Unicode according to the encoding
 				# of the font that is active at the location of this token.
-				return PdfString.from_bytes(fromUnicode(self.value, self.font, fontcache, options))
+				return PdfString.from_bytes(fromUnicode(self.value, self.font, fontcache, options), bytes_encoding='hex')
 		def __repr__(self):
 			# __repr__ is used for debugging
 			return "Token<%s>" % repr(self.value)
