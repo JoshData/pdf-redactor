@@ -50,7 +50,7 @@ of exotic capabilities used rarely or in specialized circumstances. Besides a do
 * internal object names
 * digital signatures
 
-There are so many exotic capabilities in PDF documents that it would be difficult to list them all, so this list is a very partial list. It would take a lot more effort to write a redaction tool that scanned all posssible places content can be hidden inside a PDF besides the places that this tool looks at, so please be aware that it is **your responsibility** to ensure that the PDFs you use this tool on only use the capabilities of the PDF format that this tool knows how to redact.
+There are so many exotic capabilities in PDF documents that it would be difficult to list them all, so this list is a very partial list. It would take a lot more effort to write a redaction tool that scanned all possible places content can be hidden inside a PDF besides the places that this tool looks at, so please be aware that it is **your responsibility** to ensure that the PDFs you use this tool on only use the capabilities of the PDF format that this tool knows how to redact.
 
 ### Character replacement
 
