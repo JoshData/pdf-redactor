@@ -71,19 +71,29 @@ class RedactorOptions:
 	link_filters = []
 
 
-def redactor(options):
+def redactor(options, input_filename=None, output_filename=None):
 	# This is the function that performs redaction.
 
-	if sys.version_info < (3,):
-		if options.input_stream is None:
-			options.input_stream = sys.stdin # input stream containing the PDF to redact
-		if options.output_stream is None:
-			options.output_stream = sys.stdout # output stream to write the new, redacted PDF to
+	filename_truths = [input_filename is None, output_filename is None]
+	if any(filename_truths) and not all(filename_truths):
+		raise ValueError('Both input_filename and output_filename must be valid strings or both must be None.')
+
+	use_streams = all(filename_truths)
+
+	if use_streams:
+		if sys.version_info < (3,):
+			if options.input_stream is None:
+				options.input_stream = sys.stdin # input stream containing the PDF to redact
+			if options.output_stream is None:
+				options.output_stream = sys.stdout # output stream to write the new, redacted PDF to
+		else:
+			if options.input_stream is None:
+				options.input_stream = sys.stdin.buffer # input byte stream containing the PDF to redact
+			if options.output_stream is None:
+				options.output_stream = sys.stdout.buffer # output byte stream to write the new, redacted PDF to
 	else:
-		if options.input_stream is None:
-			options.input_stream = sys.stdin.buffer # input byte stream containing the PDF to redact
-		if options.output_stream is None:
-			options.output_stream = sys.stdout.buffer # output byte stream to write the new, redacted PDF to
+		options.input_stream = input_filename
+		options.output_stream = output_filename
 
 	from pdfrw import PdfReader, PdfWriter
 
@@ -213,7 +223,7 @@ def update_xmp_metadata(trailer, options):
 					xml.etree.ElementTree.register_namespace("dc", "http://purl.org/dc/elements/1.1/")
 					xml.etree.ElementTree.register_namespace("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#")
 				return xml.etree.ElementTree.tostring(xml_root, encoding='unicode' if sys.version_info>=(3,0) else None)
-		
+
 		# Create a fresh Metadata dictionary and serialize the XML into it.
 		trailer.Root.Metadata = PdfDict()
 		trailer.Root.Metadata.Type = "Metadata"
@@ -561,7 +571,7 @@ class CMap(object):
 				continue
 			if not in_cmap:
 				continue
-			
+
 			if token == "def":
 				name = operand_stack.pop(0)
 				value = operand_stack.pop(0)
