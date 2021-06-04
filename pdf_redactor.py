@@ -376,11 +376,11 @@ def build_text_layer(document, options):
 			# __str__ is used for serialization
 			if self.value == self.original_value:
 				# If unchanged, return the raw original value without decoding/encoding.
-				return PdfString.from_bytes(self.raw_original_value)
+				return PdfString.from_bytes(self.raw_original_value, bytes_encoding='hex')
 			else:
 				# If the value changed, encode it from Unicode according to the encoding
 				# of the font that is active at the location of this token.
-				return PdfString.from_bytes(fromUnicode(self.value, self.font, fontcache, options))
+				return PdfString.from_bytes(fromUnicode(self.value, self.font, fontcache, options), bytes_encoding='hex')
 		def __repr__(self):
 			# __repr__ is used for debugging
 			return "Token<%s>" % repr(self.value)
